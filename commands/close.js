@@ -1,27 +1,39 @@
-const { SlashCommandBuilder, PermissionFlagsBits, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+// 📁 commands/close.js
+const {
+  SlashCommandBuilder,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle,
+  ActionRowBuilder,
+  ChannelType,
+  PermissionsBitField,
+  EmbedBuilder
+} = require('discord.js');
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('close')
-    .setDescription('Close this ticket (admins only)')
-    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+    .setDescription('Close this ticket with a reason'),
 
   async execute(interaction) {
-    if (!interaction.channel.name.startsWith('ticket-')) {
-      return interaction.reply({ content: '❌ Use this only in a ticket channel.', ephemeral: true });
+    const channel = interaction.channel;
+
+    if (!channel.name.startsWith('ticket-')) {
+      return interaction.reply({ content: '❌ This command can only be used in a ticket channel.', ephemeral: true });
     }
 
-    const closeButton = new ButtonBuilder()
-      .setCustomId('close_with_reason')
-      .setLabel('Close with Reason')
-      .setStyle(ButtonStyle.Danger);
+    const modal = new ModalBuilder()
+      .setCustomId('ticket_close_reason')
+      .setTitle('Close Ticket');
 
-    const row = new ActionRowBuilder().addComponents(closeButton);
+    const reason = new TextInputBuilder()
+      .setCustomId('close_reason')
+      .setLabel('Reason for closing the ticket')
+      .setStyle(TextInputStyle.Paragraph)
+      .setRequired(true)
+      .setMinLength(10);
 
-    await interaction.reply({
-      content: '⚠️ Are you sure you want to close this ticket? Click the button below to provide an optional reason.',
-      components: [row],
-      ephemeral: true,
-    });
-  },
+    const row = new ActionRowBuilder().addComponents(reason);
+    await interaction.showModal(modal.addComponents(row));
+  }
 };
