@@ -22,32 +22,34 @@ module.exports = {
     const user = interaction.options.getUser('user');
     const reason = interaction.options.getString('reason') || 'No reason provided';
 
-    const member = await interaction.guild.members.fetch(user.id).catch(() => null);
-    if (!member) {
-      return interaction.reply({
-        content: '❌ Could not find that member in this server.',
+    try {
+      const member = await interaction.guild.members.fetch(user.id);
+
+      if (!member || !member.kickable) {
+        return interaction.reply({
+          content: '❌ I cannot kick this user. Check my role position and permissions.',
+          ephemeral: true
+        });
+      }
+
+      await member.kick(reason);
+
+      const embed = new EmbedBuilder()
+        .setColor('#00FFFF')
+        .setTitle('🥾 Member Kicked')
+        .addFields(
+          { name: '👤 User', value: `${user.tag}`, inline: true },
+          { name: '📄 Reason', value: reason, inline: true }
+        )
+        .setFooter({ text: `Action by ${interaction.user.tag}` });
+
+      await interaction.reply({ embeds: [embed] });
+    } catch (error) {
+      console.error('❌ Kick error:', error);
+      await interaction.reply({
+        content: '❌ Something went wrong. Please contact a server admin.',
         ephemeral: true
       });
     }
-
-    if (!member.kickable) {
-      return interaction.reply({
-        content: '❌ I cannot kick that user.',
-        ephemeral: true
-      });
-    }
-
-    await member.kick(reason);
-
-    const embed = new EmbedBuilder()
-      .setColor('#00FFFF')
-      .setTitle('🥾 Member Kicked')
-      .addFields(
-        { name: '👤 User', value: `${user.tag}`, inline: true },
-        { name: '📄 Reason', value: reason, inline: true }
-      )
-      .setFooter({ text: 'Action executed by ' + interaction.user.tag });
-
-    await interaction.reply({ embeds: [embed] });
   }
 };
