@@ -1,48 +1,77 @@
-const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
+const {
+  SlashCommandBuilder,
+  PermissionFlagsBits,
+  EmbedBuilder
+} = require('discord.js');
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('mute')
-    .setDescription('Timeout a member for a specified duration.')
-    .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
+    .setDescription('Timeout (mute) a user for a certain time')
     .addUserOption(option =>
-      option.setName('target')
-        .setDescription('The member to mute')
+      option.setName('user')
+        .setDescription('User to mute')
         .setRequired(true))
-    .addIntegerOption(option =>
+    .addStringOption(option =>
       option.setName('duration')
-        .setDescription('Duration of the timeout in minutes (1-1440)')
-        .setRequired(true)
-        .setMinValue(1)
-        .setMaxValue(1440))
+        .setDescription('Mute duration (e.g. 1m, 5m, 1h, 1d)')
+        .setRequired(true))
     .addStringOption(option =>
       option.setName('reason')
-        .setDescription('Reason for the timeout')
-        .setRequired(false)),
+        .setDescription('Reason for mute')
+        .setRequired(false))
+    .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
 
   async execute(interaction) {
-    const target = interaction.options.getUser('target');
-    const duration = interaction.options.getInteger('duration');
+    const user = interaction.options.getUser('user');
+    const durationStr = interaction.options.getString('duration');
     const reason = interaction.options.getString('reason') || 'No reason provided';
-    const member = interaction.guild.members.cache.get(target.id);
 
-    if (!member) return interaction.reply({ content: 'User not found in this server.', ephemeral: true });
-    if (!member.moderatable) return interaction.reply({ content: 'I cannot timeout this user.', ephemeral: true });
-    if (member.id === interaction.user.id) return interaction.reply({ content: 'You cannot mute yourself.', ephemeral: true });
+    const member = await interaction.guild.members.fetch(user.id).catch(() => null);
+    if (!member) {
+      return interaction.reply({ content: '❌ Member not found.', ephemeral: true });
+    }
+
+    const durationMs = parseDuration(durationStr);
+    if (!durationMs || durationMs > 28 * 24 * 60 * 60 * 1000) {
+      return interaction.reply({ content: '❌ Invalid or too long duration (max 28d).', ephemeral: true });
+    }
 
     try {
-      await member.timeout(duration * 60 * 1000, reason);
+      await member.timeout(durationMs, reason);
+
       const embed = new EmbedBuilder()
-        .setTitle('Member Muted')
-        .setColor('#00ffff')
-        .setDescription(`**${target.tag}** has been muted for **${duration} minutes**.\n**Reason:** ${reason}`)
-        .setTimestamp()
-        .setFooter({ text: `Muted by ${interaction.user.tag}`, iconURL: interaction.user.displayAvatarURL() });
+        .setColor('#00FFFF')
+        .setTitle('🔇 User Muted')
+        .addFields(
+          { name: '👤 User', value: `${user.tag}`, inline: true },
+          { name: '⏱ Duration', value: durationStr, inline: true },
+          { name: '📄 Reason', value: reason, inline: true }
+        )
+        .setFooter({ text: 'Action executed by ' + interaction.user.tag });
 
       await interaction.reply({ embeds: [embed] });
-    } catch (error) {
-      console.error(error);
-      await interaction.reply({ content: 'There was an error muting this user.', ephemeral: true });
+    } catch (err) {
+      console.error('Mute Error:', err);
+      await interaction.reply({ content: '❌ Failed to timeout user.', ephemeral: true });
     }
   }
 };
+
+// 🔧 Helper to convert duration strings
+function parseDuration(input) {
+  const match = input.match(/^(\d+)([smhd])$/);
+  if (!match) return null;
+
+  const value = parseInt(match[1]);
+  const unit = match[2];
+
+  const unitMs = {
+    s: 1000,
+    m: 60 * 1000,
+    h: 60 * 60 * 1000,
+    d: 24 * 60 * 60 * 1000
+  };
+
+  return value * unitMs[unit];
+}
