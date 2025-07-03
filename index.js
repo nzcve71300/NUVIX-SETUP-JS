@@ -29,7 +29,6 @@ client.commands = new Collection();
 const commandsPath = path.join(__dirname, 'commands');
 const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
 
-// Load commands
 for (const file of commandFiles) {
   const command = require(path.join(commandsPath, file));
   if (command.data && command.execute) {
@@ -37,7 +36,6 @@ for (const file of commandFiles) {
   }
 }
 
-// Deploy commands
 const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
 (async () => {
   try {
@@ -52,7 +50,6 @@ const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
   }
 })();
 
-// Handle interactions
 client.on('interactionCreate', async interaction => {
   if (interaction.isChatInputCommand()) {
     const command = client.commands.get(interaction.commandName);
@@ -68,6 +65,7 @@ client.on('interactionCreate', async interaction => {
     }
   }
 
+  // 💠 Setup Verify System Interactions
   if (interaction.type === InteractionType.ModalSubmit && interaction.customId === 'verify_setup_modal') {
     const setupCommand = require('./commands/setup-verify.js');
     try {
@@ -155,6 +153,132 @@ client.on('interactionCreate', async interaction => {
       .setFooter({ text: 'Welcome aboard!', iconURL: interaction.client.user.displayAvatarURL() });
 
     await interaction.reply({ embeds: [confirmedEmbed], ephemeral: true });
+  }
+
+  // 🎫 Ticket Button Logic
+  const configPath = path.join(__dirname, 'ticketConfig.json');
+  const config = fs.existsSync(configPath) ? JSON.parse(fs.readFileSync(configPath, 'utf8')) : {};
+  const ticketChannelId = config[interaction.guild?.id]?.ticketChannelId || config.ticketChannelId;
+  const handlerRoleId = config[interaction.guild?.id]?.handlerRoleId || config.handlerRoleId;
+
+  if (interaction.isButton()) {
+    if (interaction.customId === 'rust_help') {
+      const modal = new ModalBuilder()
+        .setCustomId('rust_modal')
+        .setTitle('🔧 Rust Help Request')
+        .addComponents(
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder()
+              .setCustomId('rust_ign')
+              .setLabel('In-game/Discord Name?')
+              .setPlaceholder('eg. nzcve7130')
+              .setStyle(TextInputStyle.Short)
+              .setRequired(true)
+          ),
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder()
+              .setCustomId('rust_issue')
+              .setLabel('Describe your issue')
+              .setStyle(TextInputStyle.Paragraph)
+              .setRequired(true)
+          )
+        );
+      return interaction.showModal(modal);
+    }
+
+    if (interaction.customId === 'discord_help') {
+      const modal = new ModalBuilder()
+        .setCustomId('discord_modal')
+        .setTitle('💬 Discord Help Request')
+        .addComponents(
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder()
+              .setCustomId('discord_name')
+              .setLabel('Discord Name?')
+              .setPlaceholder('eg. nzcve7130')
+              .setStyle(TextInputStyle.Short)
+              .setRequired(true)
+          ),
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder()
+              .setCustomId('discord_problem')
+              .setLabel('Problem?')
+              .setStyle(TextInputStyle.Paragraph)
+              .setRequired(true)
+          )
+        );
+      return interaction.showModal(modal);
+    }
+
+    if (interaction.customId === 'purchase_help') {
+      const modal = new ModalBuilder()
+        .setCustomId('purchase_modal')
+        .setTitle('💸 Purchase Help')
+        .addComponents(
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder()
+              .setCustomId('purchase_name')
+              .setLabel('In-game/Discord Name?')
+              .setStyle(TextInputStyle.Short)
+              .setRequired(true)
+          ),
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder()
+              .setCustomId('purchase_option')
+              .setLabel('How can we help? (e.g., How do I pay? / Verify my purchase)')
+              .setStyle(TextInputStyle.Short)
+              .setRequired(true)
+          ),
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder()
+              .setCustomId('purchase_email')
+              .setLabel('Email associated with purchase (optional)')
+              .setStyle(TextInputStyle.Short)
+              .setRequired(false)
+          )
+        );
+      return interaction.showModal(modal);
+    }
+  }
+
+  if (interaction.type === InteractionType.ModalSubmit) {
+    const user = interaction.user;
+    const guild = interaction.guild;
+
+    const embed = new EmbedBuilder()
+      .setColor('#00ffff')
+      .setTitle('📩 New Support Ticket')
+      .setDescription(`From: <@${user.id}>`)
+      .setFooter({ text: 'Nuvix Ticket System', iconURL: interaction.client.user.displayAvatarURL() })
+      .setTimestamp();
+
+    if (interaction.customId === 'rust_modal') {
+      embed.addFields(
+        { name: 'Name', value: interaction.fields.getTextInputValue('rust_ign') },
+        { name: 'Issue', value: interaction.fields.getTextInputValue('rust_issue') }
+      );
+    }
+
+    if (interaction.customId === 'discord_modal') {
+      embed.addFields(
+        { name: 'Discord Name', value: interaction.fields.getTextInputValue('discord_name') },
+        { name: 'Problem', value: interaction.fields.getTextInputValue('discord_problem') }
+      );
+    }
+
+    if (interaction.customId === 'purchase_modal') {
+      embed.addFields(
+        { name: 'Name', value: interaction.fields.getTextInputValue('purchase_name') },
+        { name: 'Request Type', value: interaction.fields.getTextInputValue('purchase_option') },
+        { name: 'Email (if provided)', value: interaction.fields.getTextInputValue('purchase_email') || 'Not provided' }
+      );
+    }
+
+    const ticketChannel = guild.channels.cache.get(ticketChannelId);
+    if (!ticketChannel) return interaction.reply({ content: '❌ Ticket channel not found.', ephemeral: true });
+
+    await ticketChannel.send({ content: `<@&${handlerRoleId}>`, embeds: [embed] });
+    await interaction.reply({ content: '✅ Your ticket has been submitted. A staff member will assist you shortly.', ephemeral: true });
   }
 });
 

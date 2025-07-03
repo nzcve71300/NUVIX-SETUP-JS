@@ -26,14 +26,13 @@ module.exports = {
       .setTitle('Support Ticket')
       .setDescription(description);
 
-    const button = new ButtonBuilder()
-      .setCustomId('open_ticket')
-      .setLabel('Open Ticket')
-      .setStyle(ButtonStyle.Primary);
+    const buttons = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('rust_help').setLabel('Rust Help').setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId('discord_help').setLabel('Discord Help').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('purchase_help').setLabel('Purchase Help').setStyle(ButtonStyle.Success)
+    );
 
-    const row = new ActionRowBuilder().addComponents(button);
-
-    await channel.send({ embeds: [embed], components: [row] });
+    await channel.send({ embeds: [embed], components: [buttons] });
     await interaction.reply({ content: `✅ Ticket system set up in ${channel}`, ephemeral: true });
   },
 };
