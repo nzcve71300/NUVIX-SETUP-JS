@@ -14,7 +14,8 @@ const {
   ModalBuilder,
   TextInputBuilder,
   TextInputStyle,
-  PermissionsBitField,
+  ChannelType,
+  PermissionsBitField
 } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
@@ -65,16 +66,6 @@ client.on('interactionCreate', async interaction => {
     }
   }
 
-  // 💠 Setup Verify System Interactions
-  if (interaction.type === InteractionType.ModalSubmit && interaction.customId === 'verify_setup_modal') {
-    const setupCommand = require('./commands/setup-verify.js');
-    try {
-      await setupCommand.handleModal(interaction);
-    } catch (err) {
-      console.error(err);
-    }
-  }
-
   if (interaction.isChannelSelectMenu() && interaction.customId === 'select_verify_channel') {
     const setupCommand = require('./commands/setup-verify.js');
     try {
@@ -108,177 +99,135 @@ client.on('interactionCreate', async interaction => {
     await interaction.reply({ embeds: [rulesEmbed], components: [row], ephemeral: true });
   }
 
-  if (interaction.isButton() && interaction.customId === 'accept_rules') {
-    const modal = new ModalBuilder()
-      .setCustomId('verify_modal')
-      .setTitle('📝 Final Step: Enter Your Name');
+  if (interaction.isButton()) {
+    const { guild, member, user } = interaction;
+    const configPath = path.join(__dirname, 'ticketConfig.json');
+    const config = fs.existsSync(configPath) ? JSON.parse(fs.readFileSync(configPath, 'utf8')) : {};
+    const handlerRoleId = config.handlerRoleId;
 
-    const nameInput = new TextInputBuilder()
-      .setCustomId('name_input')
-      .setLabel('Enter your name')
-      .setStyle(TextInputStyle.Short)
-      .setPlaceholder('Example: Zander')
-      .setRequired(true);
+    const createTicketChannel = async (categoryName, formData) => {
+      let category = guild.channels.cache.find(c => c.name === categoryName.toLowerCase() && c.type === ChannelType.GuildCategory);
+      if (!category) {
+        category = await guild.channels.create({
+          name: categoryName.toLowerCase(),
+          type: ChannelType.GuildCategory
+        });
+      }
 
-    const row = new ActionRowBuilder().addComponents(nameInput);
-    modal.addComponents(row);
-
-    await interaction.showModal(modal);
-  }
-
-  if (interaction.type === InteractionType.ModalSubmit && interaction.customId === 'verify_modal') {
-    const name = interaction.fields.getTextInputValue('name_input');
-    const guild = interaction.guild;
-
-    let role = guild.roles.cache.find(r => r.name.toLowerCase() === 'verified');
-    if (!role) {
-      role = await guild.roles.create({
-        name: 'Verified',
-        color: '#00ffff',
-        reason: 'Auto-created for verification'
+      const channel = await guild.channels.create({
+        name: `ticket-${user.username.toLowerCase()}`,
+        type: ChannelType.GuildText,
+        parent: category,
+        permissionOverwrites: [
+          { id: guild.roles.everyone, deny: [PermissionsBitField.Flags.ViewChannel] },
+          { id: user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] },
+          { id: handlerRoleId, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] },
+          { id: guild.members.me.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] }
+        ]
       });
 
-      const botMember = await guild.members.fetchMe();
-      await guild.roles.setPosition(role, botMember.roles.highest.position - 1);
+      const embed = new EmbedBuilder()
+        .setColor('#00ffff')
+        .setTitle(`🎫 ${categoryName} Ticket`)
+        .addFields(formData.map(f => ({ name: f.label, value: f.value || 'N/A' })))
+        .setFooter({ text: `User: ${user.tag}`, iconURL: user.displayAvatarURL() });
+
+      await channel.send({ content: `<@&${handlerRoleId}>`, embeds: [embed] });
+      await interaction.reply({ content: `✅ Ticket created: ${channel}`, ephemeral: true });
+    };
+
+    if (interaction.customId === 'accept_rules') {
+      const modal = new ModalBuilder().setCustomId('verify_modal').setTitle('📝 Final Step: Enter Your Name');
+      const nameInput = new TextInputBuilder()
+        .setCustomId('name_input')
+        .setLabel('Enter your name')
+        .setStyle(TextInputStyle.Short)
+        .setPlaceholder('Example: Zander')
+        .setRequired(true);
+      modal.addComponents(new ActionRowBuilder().addComponents(nameInput));
+      await interaction.showModal(modal);
     }
 
-    await interaction.member.roles.add(role).catch(err => {
-      console.error('❌ Failed to assign Verified role:', err);
-    });
-
-    const confirmedEmbed = new EmbedBuilder()
-      .setColor('#00ffff')
-      .setTitle('✅ You Are Verified!')
-      .setDescription(`Thanks **${name}**, you've been verified and granted access.`)
-      .setFooter({ text: 'Welcome aboard!', iconURL: interaction.client.user.displayAvatarURL() });
-
-    await interaction.reply({ embeds: [confirmedEmbed], ephemeral: true });
-  }
-
-  // 🎫 Ticket Button Logic
-  const configPath = path.join(__dirname, 'ticketConfig.json');
-  const config = fs.existsSync(configPath) ? JSON.parse(fs.readFileSync(configPath, 'utf8')) : {};
-  const ticketChannelId = config[interaction.guild?.id]?.ticketChannelId || config.ticketChannelId;
-  const handlerRoleId = config[interaction.guild?.id]?.handlerRoleId || config.handlerRoleId;
-
-  if (interaction.isButton()) {
-    if (interaction.customId === 'rust_help') {
-      const modal = new ModalBuilder()
-        .setCustomId('rust_modal')
-        .setTitle('🔧 Rust Help Request')
-        .addComponents(
-          new ActionRowBuilder().addComponents(
-            new TextInputBuilder()
-              .setCustomId('rust_ign')
-              .setLabel('In-game/Discord Name?')
-              .setPlaceholder('eg. nzcve7130')
-              .setStyle(TextInputStyle.Short)
-              .setRequired(true)
-          ),
-          new ActionRowBuilder().addComponents(
-            new TextInputBuilder()
-              .setCustomId('rust_issue')
-              .setLabel('Describe your issue')
-              .setStyle(TextInputStyle.Paragraph)
-              .setRequired(true)
-          )
-        );
+    if (interaction.customId === 'open_ticket_rust') {
+      const modal = new ModalBuilder().setCustomId('modal_rust').setTitle('🛠 Rust Help');
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('ign').setLabel('In-game or Discord Name').setStyle(TextInputStyle.Short).setRequired(true)),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('issue').setLabel('Describe your issue').setStyle(TextInputStyle.Paragraph).setRequired(true))
+      );
       return interaction.showModal(modal);
     }
 
-    if (interaction.customId === 'discord_help') {
-      const modal = new ModalBuilder()
-        .setCustomId('discord_modal')
-        .setTitle('💬 Discord Help Request')
-        .addComponents(
-          new ActionRowBuilder().addComponents(
-            new TextInputBuilder()
-              .setCustomId('discord_name')
-              .setLabel('Discord Name?')
-              .setPlaceholder('eg. nzcve7130')
-              .setStyle(TextInputStyle.Short)
-              .setRequired(true)
-          ),
-          new ActionRowBuilder().addComponents(
-            new TextInputBuilder()
-              .setCustomId('discord_problem')
-              .setLabel('Problem?')
-              .setStyle(TextInputStyle.Paragraph)
-              .setRequired(true)
-          )
-        );
+    if (interaction.customId === 'open_ticket_discord') {
+      const modal = new ModalBuilder().setCustomId('modal_discord').setTitle('💬 Discord Help');
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('discord_name').setLabel('Discord Name').setStyle(TextInputStyle.Short).setRequired(true)),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('problem').setLabel('Problem?').setStyle(TextInputStyle.Paragraph).setRequired(true))
+      );
       return interaction.showModal(modal);
     }
 
-    if (interaction.customId === 'purchase_help') {
-      const modal = new ModalBuilder()
-        .setCustomId('purchase_modal')
-        .setTitle('💸 Purchase Help')
-        .addComponents(
-          new ActionRowBuilder().addComponents(
-            new TextInputBuilder()
-              .setCustomId('purchase_name')
-              .setLabel('In-game/Discord Name?')
-              .setStyle(TextInputStyle.Short)
-              .setRequired(true)
-          ),
-          new ActionRowBuilder().addComponents(
-            new TextInputBuilder()
-              .setCustomId('purchase_option')
-              .setLabel('How can we help? (e.g., How do I pay? / Verify my purchase)')
-              .setStyle(TextInputStyle.Short)
-              .setRequired(true)
-          ),
-          new ActionRowBuilder().addComponents(
-            new TextInputBuilder()
-              .setCustomId('purchase_email')
-              .setLabel('Email associated with purchase (optional)')
-              .setStyle(TextInputStyle.Short)
-              .setRequired(false)
-          )
-        );
+    if (interaction.customId === 'open_ticket_purchase') {
+      const modal = new ModalBuilder().setCustomId('modal_purchase').setTitle('💸 Purchase Help');
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('purchase_name').setLabel('In-game or Discord Name').setStyle(TextInputStyle.Short).setRequired(true)),
+        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('purchase_type').setLabel('How do I pay? / Verify purchase / Email used').setStyle(TextInputStyle.Paragraph).setRequired(true))
+      );
       return interaction.showModal(modal);
     }
   }
 
   if (interaction.type === InteractionType.ModalSubmit) {
-    const user = interaction.user;
-    const guild = interaction.guild;
+    const id = interaction.customId;
 
-    const embed = new EmbedBuilder()
-      .setColor('#00ffff')
-      .setTitle('📩 New Support Ticket')
-      .setDescription(`From: <@${user.id}>`)
-      .setFooter({ text: 'Nuvix Ticket System', iconURL: interaction.client.user.displayAvatarURL() })
-      .setTimestamp();
-
-    if (interaction.customId === 'rust_modal') {
-      embed.addFields(
-        { name: 'Name', value: interaction.fields.getTextInputValue('rust_ign') },
-        { name: 'Issue', value: interaction.fields.getTextInputValue('rust_issue') }
-      );
+    if (id === 'modal_rust') {
+      const fields = [
+        { label: 'In-game or Discord Name', value: interaction.fields.getTextInputValue('ign') },
+        { label: 'Issue Description', value: interaction.fields.getTextInputValue('issue') }
+      ];
+      return await createTicketChannel('Rust Help', fields);
     }
 
-    if (interaction.customId === 'discord_modal') {
-      embed.addFields(
-        { name: 'Discord Name', value: interaction.fields.getTextInputValue('discord_name') },
-        { name: 'Problem', value: interaction.fields.getTextInputValue('discord_problem') }
-      );
+    if (id === 'modal_discord') {
+      const fields = [
+        { label: 'Discord Name', value: interaction.fields.getTextInputValue('discord_name') },
+        { label: 'Problem', value: interaction.fields.getTextInputValue('problem') }
+      ];
+      return await createTicketChannel('Discord Help', fields);
     }
 
-    if (interaction.customId === 'purchase_modal') {
-      embed.addFields(
-        { name: 'Name', value: interaction.fields.getTextInputValue('purchase_name') },
-        { name: 'Request Type', value: interaction.fields.getTextInputValue('purchase_option') },
-        { name: 'Email (if provided)', value: interaction.fields.getTextInputValue('purchase_email') || 'Not provided' }
-      );
+    if (id === 'modal_purchase') {
+      const fields = [
+        { label: 'In-game or Discord Name', value: interaction.fields.getTextInputValue('purchase_name') },
+        { label: 'Purchase Info', value: interaction.fields.getTextInputValue('purchase_type') }
+      ];
+      return await createTicketChannel('Purchase Help', fields);
     }
 
-    const ticketChannel = guild.channels.cache.get(ticketChannelId);
-    if (!ticketChannel) return interaction.reply({ content: '❌ Ticket channel not found.', ephemeral: true });
+    if (id === 'verify_modal') {
+      const name = interaction.fields.getTextInputValue('name_input');
+      const guild = interaction.guild;
 
-    await ticketChannel.send({ content: `<@&${handlerRoleId}>`, embeds: [embed] });
-    await interaction.reply({ content: '✅ Your ticket has been submitted. A staff member will assist you shortly.', ephemeral: true });
+      let role = guild.roles.cache.find(r => r.name.toLowerCase() === 'verified');
+      if (!role) {
+        role = await guild.roles.create({
+          name: 'Verified',
+          color: '#00ffff',
+          reason: 'Auto-created for verification'
+        });
+        const botMember = await guild.members.fetchMe();
+        await guild.roles.setPosition(role, botMember.roles.highest.position - 1);
+      }
+
+      await interaction.member.roles.add(role).catch(console.error);
+
+      const confirmedEmbed = new EmbedBuilder()
+        .setColor('#00ffff')
+        .setTitle('✅ You Are Verified!')
+        .setDescription(`Thanks **${name}**, you've been verified and granted access.`)
+        .setFooter({ text: 'Welcome aboard!', iconURL: interaction.client.user.displayAvatarURL() });
+
+      return await interaction.reply({ embeds: [confirmedEmbed], ephemeral: true });
+    }
   }
 });
 
