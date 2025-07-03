@@ -20,9 +20,14 @@ function loadData() {
 module.exports = async (interaction, client) => {
   const id = interaction.customId;
 
-  // Step 1 - Panel message
+  // 🧠 Store per-user cache safely
+  if (!client._ticketCache) client._ticketCache = {};
+  const userId = interaction.user.id;
+
+  // Step 1: Admin types panel message
   if (id === 'setup_panel_message') {
     const msg = interaction.fields.getTextInputValue('panel_desc');
+    client._ticketCache[userId] = { message: msg };
 
     const channelSelect = new ModalBuilder()
       .setCustomId('setup_panel_channel')
@@ -35,17 +40,19 @@ module.exports = async (interaction, client) => {
       .setRequired(true);
 
     const row = new ActionRowBuilder().addComponents(input);
-    interaction.client.tempSetup = { message: msg };
     return interaction.showModal(channelSelect.addComponents(row));
   }
 
-  // Step 2 - Panel channel
+  // Step 2: Admin picks a channel
   if (id === 'setup_panel_channel') {
     const channelInput = interaction.fields.getTextInputValue('panel_channel');
     const channelId = channelInput.replace(/[<#>]/g, '');
     const channel = interaction.guild.channels.cache.get(channelId);
 
     if (!channel) return interaction.reply({ content: '❌ Invalid channel.', ephemeral: true });
+
+    if (!client._ticketCache[userId]) client._ticketCache[userId] = {};
+    client._ticketCache[userId].channelId = channel.id;
 
     const roleModal = new ModalBuilder()
       .setCustomId('setup_panel_role')
@@ -58,11 +65,10 @@ module.exports = async (interaction, client) => {
       .setRequired(true);
 
     const row = new ActionRowBuilder().addComponents(input);
-    interaction.client.tempSetup.channelId = channel.id;
     return interaction.showModal(roleModal.addComponents(row));
   }
 
-  // Step 3 - Staff role + send panel
+  // Step 3: Admin picks role, then panel is sent
   if (id === 'setup_panel_role') {
     const roleInput = interaction.fields.getTextInputValue('staff_role');
     const roleId = roleInput.replace(/[<@&>]/g, '');
@@ -70,11 +76,15 @@ module.exports = async (interaction, client) => {
 
     if (!role) return interaction.reply({ content: '❌ Invalid role.', ephemeral: true });
 
-    const { channelId, message } = interaction.client.tempSetup;
-    const targetChannel = interaction.guild.channels.cache.get(channelId);
+    const setup = client._ticketCache[userId];
+    if (!setup || !setup.channelId || !setup.message) {
+      return interaction.reply({ content: '❌ Setup data missing. Please run /ticket-setup again.', ephemeral: true });
+    }
+
+    const targetChannel = interaction.guild.channels.cache.get(setup.channelId);
     const panel = new EmbedBuilder()
       .setTitle('🎫 Support Tickets')
-      .setDescription(message)
+      .setDescription(setup.message)
       .setColor(0x00ffff);
 
     const row = new ActionRowBuilder().addComponents(
@@ -92,7 +102,7 @@ module.exports = async (interaction, client) => {
     saveData(data);
   }
 
-  // Handle ticket creation from modals
+  // ✅ Handle user modal forms (Rust, Discord, Verify)
   if (id.startsWith('form_rust') || id.startsWith('form_discord') || id.startsWith('form_verify')) {
     const data = loadData();
     const user = interaction.user;
@@ -133,17 +143,17 @@ module.exports = async (interaction, client) => {
     await interaction.reply({ content: `✅ Your ticket has been opened: <#${channel.id}>`, ephemeral: true });
   }
 
-  // Handle ticket close reason
+  // ✅ Handle ticket closing modal
   if (id === 'ticket_close_reason') {
     const reason = interaction.fields.getTextInputValue('close_reason');
     const channel = interaction.channel;
     const guild = interaction.guild;
 
     const userIdMatch = channel.topic?.match(/ticket-(\d+)/);
-    const userId = userIdMatch ? userIdMatch[1] : null;
-    if (!userId) return interaction.reply({ content: '❌ Could not find ticket creator.', ephemeral: true });
+    const ticketUserId = userIdMatch ? userIdMatch[1] : null;
+    if (!ticketUserId) return interaction.reply({ content: '❌ Could not find ticket creator.', ephemeral: true });
 
-    const user = await client.users.fetch(userId).catch(() => null);
+    const user = await client.users.fetch(ticketUserId).catch(() => null);
     if (!user) return interaction.reply({ content: '❌ Failed to fetch ticket user.', ephemeral: true });
 
     const embed = new EmbedBuilder()
